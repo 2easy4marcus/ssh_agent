@@ -4,7 +4,11 @@ Edge Device SSH Proof of Concept
 Automated setup and file transfer to edge devices with user-friendly feedback.
 """
 
+import os
+from dotenv import load_dotenv
 from ssh_client import SSHAgent
+
+load_dotenv()
 
 
 def print_header():
@@ -34,15 +38,13 @@ def print_hint(message: str):
 
 
 def run_poc():
-    """Main PoC flow with user-friendly output"""
     print_header()
     
-    # Configuration
-    HOSTNAME = "factory"
-    USERNAME = "admin"
-    PASSWORD = "123456"
-    KEY_PATH = "~/.ssh/ansible"
-    LOCAL_FILE = "README.md"
+    HOSTNAME = os.getenv("EDGE_HOSTNAME", "factory")
+    USERNAME = os.getenv("EDGE_USERNAME", "admin")
+    PASSWORD = os.getenv("EDGE_PASSWORD", "")
+    KEY_PATH = os.getenv("SSH_KEY_PATH", "~/.ssh/id_rsa")
+    LOCAL_FILE = os.getenv("LOCAL_FILE", "README.md")
     
     print(f"  Target Device: {HOSTNAME}")
     print(f"  Username: {USERNAME}")
@@ -116,9 +118,6 @@ def run_poc():
         print_hint(f"Technical details: {e}")
         return False
     
-    # =========================================================================
-    # STEP 4: Verify Secure Connection
-    # =========================================================================
     print_step(4, 5, "Verifying Secure Connection")
     print("  Testing password-free authentication...")
     
@@ -145,9 +144,6 @@ def run_poc():
         print_hint(f"Technical details: {e}")
         return False
     
-    # =========================================================================
-    # STEP 5: Transfer File
-    # =========================================================================
     print_step(5, 5, "Transferring File to Device")
     print(f"  Uploading '{LOCAL_FILE}' to the edge device...")
     
@@ -182,9 +178,7 @@ def run_poc():
     
     agent.disconnect()
     
-    # =========================================================================
-    # SUCCESS
-    # =========================================================================
+
     print("\n" + "=" * 65)
     print("                    ✓ ALL STEPS COMPLETED!")
     print("=" * 65)
