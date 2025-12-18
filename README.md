@@ -1,328 +1,263 @@
-# Edge Node Diagnostic Tool
+# 🔍 Edge Node Diagnostic Tool
 
-A simple, inventory-driven diagnostic framework for edge devices. One tool, many hosts.
+A simple, friendly diagnostic tool for edge devices. Check if your devices are healthy with one command.
 
-## Overview
+## What It Does
 
-This tool runs health checks on remote edge devices (OCUs, sensors, etc.) via SSH. All host-specific configuration lives in `inventory.yaml` - the code stays generic.
-
-**Key Features:**
-- 🔧 Inventory-driven - add hosts without changing code
-- 🔐 Auto SSH key bootstrap - handles authentication automatically
-- 📊 Human-friendly output - clear status with actionable hints
-- 📦 Support bundles - auto-generated on failures for easy troubleshooting
+- ✅ Checks if your device is reachable
+- 💻 Monitors system health (CPU, memory, storage)
+- 🌐 Verifies network and VPN connections
+- ⚙️ Checks if all applications are running properly
+- 🔌 Detects connected USB devices
 
 ## Quick Start
 
 ```bash
-# 1. Install dependencies
+# Install
 pip install -r requirements.txt
 
-# 2. Configure your hosts in inventory.yaml (see below)
-
-# 3. Run diagnostics
+# Run diagnostics on a device
 python overall_diagnose.py --host ocu4
+```
+
+## Output Example
+
+```
+╔═══════════════════════════════════════════════════════════════╗
+║                      🔍 Checking: ocu4                        ║
+╚═══════════════════════════════════════════════════════════════╝
+
+  💻 System Health
+  ──────────────────────────────────────
+    ✅ Device: ocu4
+    ✅ System up 5 days, 3 hours
+    ✅ Processor running smoothly
+    ✅ Memory OK (45% used)
+    ✅ Storage OK (32% used)
+
+  ⚙️ Applications & Services
+  ──────────────────────────────────────
+    ✅ All 12 applications running smoothly
+
+╔═══════════════════════════════════════════════════════════════╗
+║                        📊 Summary                             ║
+╚═══════════════════════════════════════════════════════════════╝
+
+    🟢 ALL GOOD!
+       Everything is working perfectly.
+```
+
+## When Problems Are Found
+
+The tool clearly explains what's wrong and how to fix it:
+
+```
+    🔴 PROBLEMS FOUND - Action Required!
+       Found 1 problem(s) that need to be fixed:
+
+       ❌ App: aggregator
+          What's wrong: 🚨 CRITICAL: This app keeps crashing and restarting!
+          How to fix: 🚨 URGENT: Contact support immediately!
 ```
 
 ## Installation
 
 ```bash
-# Clone the repo
+# 1. Clone the repository
 git clone <repo-url>
 cd edge-diagnostic
 
-# Create virtual environment (recommended)
+# 2. Create virtual environment (recommended)
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate  # Linux/Mac
+# or: .venv\Scripts\activate  # Windows
 
-# Install dependencies
+# 3. Install dependencies
 pip install -r requirements.txt
 ```
 
-### Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `click` | CLI interface |
-| `paramiko` | SSH connections |
-| `PyYAML` | Inventory parsing |
-| `pyusb` | Local USB detection (optional) |
-
 ## Usage
 
-### Show Available Hosts
+### Basic Commands
 
 ```bash
-python overall_diagnose.py
-```
-
-Output:
-```
-=================================================================
-        EDGE NODE DIAGNOSTIC TOOL
-=================================================================
-
-  Available hosts:
-    • ocu4 (100.64.0.14)
-    • edge1 (192.168.1.100)
-
-  Usage:
-    python overall_diagnose.py --host ocu4
-    python overall_diagnose.py --all-hosts
-```
-
-### Diagnose a Single Host
-
-```bash
+# Check a single device
 python overall_diagnose.py --host ocu4
-```
 
-### Diagnose All Hosts
+# Check multiple devices
+python overall_diagnose.py --host ocu4 --host edge1
 
-```bash
-python overall_diagnose.py --all-hosts
-```
-
-### Run Specific Checks Only
-
-```bash
-# Only system checks
+# Run only specific checks
 python overall_diagnose.py --host ocu4 --check system
-
-# Multiple specific checks
-python overall_diagnose.py --host ocu4 --check system --check services
+python overall_diagnose.py --host ocu4 --check services --check devices
 ```
 
-### CLI Options
+### Available Options
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--host` | `-h` | Host(s) to diagnose (from inventory) |
-| `--all-hosts` | | Run on all hosts in inventory |
-| `--check` | `-c` | Specific check(s): `system`, `network`, `services`, `devices` |
+| `--host` | `-h` | Device to check (required) |
+| `--check` | `-c` | Specific checks: `system`, `network`, `services`, `devices` |
 | `--verbose` | `-v` | Show more technical details |
 | `--json-output` | | Output results as JSON |
 | `--inventory` | | Custom inventory file path |
+
+### Available Checks
+
+| Check | What It Does |
+|-------|--------------|
+| `system` | CPU, memory, storage, uptime |
+| `network` | VPN connection, network interfaces |
+| `services` | Docker containers, system services |
+| `devices` | USB devices (laser, sensors, etc.) |
 
 ## Configuration
 
 ### inventory.yaml
 
-All host configuration lives here. Add new hosts by copying an existing block:
+Add your devices to `inventory.yaml`:
 
 ```yaml
 ocu4:
   connection:
-    hostname: "100.64.0.14"      # IP or hostname
-    username: admin              # SSH user
-    port: 22                     # SSH port (default: 22)
-    password: "123456"           # For initial connection / key bootstrap
-    ssh_key_path: "~/.ssh/ansible"  # SSH key to use
+    hostname: "100.64.0.14"    # IP address or hostname
+    username: admin            # SSH username
+    port: 22                   # SSH port
+    password: "your-password"  # For initial connection
+    ssh_key_path: "~/.ssh/id_rsa"
 
   network:
-    vpn_type: tailscale          # tailscale | none
+    vpn_type: tailscale        # tailscale or none
 
   services:
-    docker_containers:           # Required containers to check
-      - ocu-app
-      - mqtt-broker
-    systemd_services:            # Required services to check
+    compose_dir: "/opt/app"    # Folder with docker-compose files
+    systemd_services:
       - docker
       - tailscaled
 
   devices:
-    usb:                         # Required USB devices
-      - name: "Oxxius Laser"
-        vendor_id: "0x0403"
-        product_id: "0x90D9"
-        required: true
-      - name: "USB Hub"
-        vendor_id: "0x0bda"
-        product_id: "0x5411"
-        required: false          # Optional device
+    laser:
+      vendor_id: "0x0403"
+      product_id: "0x90D9"
+    sensor:
+      vendor_id: "0x1234"
+      product_id: "0x5678"
 ```
 
-### Adding a New Host
+### Adding a New Device
 
-1. Copy an existing host block in `inventory.yaml`
-2. Change the host name and connection details
-3. Adjust services/devices as needed
-4. Run: `python overall_diagnose.py --host <new-host>`
+1. Copy an existing device block in `inventory.yaml`
+2. Change the name and connection details
+3. Update services and devices as needed
+4. Run: `python overall_diagnose.py --host <new-device>`
 
-No code changes required!
+## Reports
 
-## Available Checks
-
-### System (`--check system`)
-
-| Check | What it does |
-|-------|--------------|
-| Hostname | Verifies device identity |
-| Uptime | Shows how long system has been running |
-| CPU Load | Checks processor usage (warns if overloaded) |
-| Memory | Checks RAM usage (warns >70%, fails >85%) |
-| Disk | Checks disk space (warns >70%, fails >85%) |
-
-### Network (`--check network`)
-
-| Check | What it does |
-|-------|--------------|
-| Tailscale VPN | Pings device via Tailscale (if configured) |
-| Network Interfaces | Verifies network interfaces are up |
-
-### Services (`--check services`)
-
-| Check | What it does |
-|-------|--------------|
-| Docker Daemon | Verifies Docker is running |
-| Containers | Checks each container is running (not crashed/restarting) |
-| Systemd Services | Verifies each service is active |
-
-On failure, logs are automatically collected for the support bundle.
-
-### Devices (`--check devices`)
-
-| Check | What it does |
-|-------|--------------|
-| USB Scan | Lists all connected USB devices |
-| Required Devices | Verifies each required device is present |
-
-**Note:** USB detection runs on the **local machine** using `pyusb`. For remote USB detection, the tool uses `lsusb` over SSH.
-
-## Output Format
-
-The tool provides human-friendly output:
-
-```
-[Step 1/4] Establishing Connection
----------------------------------------------
-  ✓ Connected using SSH key: ~/.ssh/ansible
-
-[Step 2/4] System Health
----------------------------------------------
-  ✓ Device name: ocu4
-  ✓ System up 5 days, 3 hours
-  ✓ CPU load normal (0.5 on 4 cores)
-  ✓ Memory OK (45% used)
-  ⚠ Disk getting full (78% used)
-  💡 Delete old logs or unused files to free space
-
-=================================================================
-        DIAGNOSTIC SUMMARY
-=================================================================
-  ✓ Passed: 5
-  ⚠ Warnings: 1
-  ✗ Failed: 0
-
-  WHAT NEEDS ATTENTION:
-    ⚠ Disk: Disk getting full (78% used)
-```
-
-### Status Icons
-
-| Icon | Meaning |
-|------|---------|
-| ✓ | OK - Everything working |
-| ⚠ | Warning - Needs attention soon |
-| ✗ | Failed - Action required |
-| 💡 | Hint - Suggested action |
-
-## Support Bundles
-
-When failures occur, a support bundle is automatically created:
+Every diagnostic run creates a report in the `reports/` folder:
 
 ```
 reports/
 └── ocu4/
-    └── 20241217_143052/
-        ├── report.txt           # Human-readable report
-        ├── support_message.txt  # Copy-paste for support ticket
-        ├── container_ocu-app.log
-        └── service_docker.log
+    └── 20241218_143052/
+        ├── report.txt           # Human-friendly report
+        ├── support_message.txt  # Ready to send to support
+        └── container_*.log      # Logs from failed services
 ```
 
-The `support_message.txt` contains a pre-formatted message you can paste directly into a support ticket.
+**Note:** Old reports are automatically deleted. Only the latest report is kept.
+
+### Report Contents
+
+The `report.txt` is written in plain language:
+
+```
+╔═══════════════════════════════════════════════════════════════╗
+║              🔍 DEVICE HEALTH CHECK REPORT                    ║
+╚═══════════════════════════════════════════════════════════════╝
+
+📅 Date: December 18, 2024 at 14:30
+🖥️  Device: ocu4
+
+──────────────────────────────────────────────────────────────
+🟢 OVERALL STATUS: ALL GOOD!
+   Everything is working perfectly.
+──────────────────────────────────────────────────────────────
+```
+
+## Status Indicators
+
+| Status | Meaning |
+|--------|---------|
+| 🟢 ALL GOOD | Everything working perfectly |
+| 🟡 MOSTLY OK | Working, but some things need attention |
+| 🔴 PROBLEMS FOUND | Issues that need to be fixed |
+
+### Service Status
+
+| Status | Meaning | Action |
+|--------|---------|--------|
+| ✅ Running | App is working fine | None needed |
+| ⚠️ Unhealthy | App running but has issues | Monitor it |
+| ❌ Stopped | App has stopped | Needs restart |
+| ❌ Restarting | App keeps crashing | **Contact support!** |
 
 ## SSH Key Bootstrap
 
-The tool handles SSH authentication automatically:
+The tool automatically handles SSH authentication:
 
-1. **First run:** Connects with password, generates SSH key, copies to remote
-2. **Subsequent runs:** Uses SSH key (no password needed)
+1. **First run:** Connects with password, sets up SSH key
+2. **Future runs:** Uses SSH key (no password needed)
 
-This is idempotent - running multiple times won't duplicate keys.
-
-If connection fails, you'll see clear instructions:
-
-```
-  ✗ Could not connect to device
-
-  WHAT TO DO:
-    1. Check if the device is powered on
-    2. Verify network/VPN connection
-    3. Check credentials in inventory.yaml
-    4. Try manually: ssh admin@100.64.0.14
-```
+This is automatic and safe - running multiple times won't cause issues.
 
 ## Project Structure
 
 ```
-├── overall_diagnose.py     # Main CLI entrypoint
-├── inventory.yaml          # Host configurations
-├── requirements.txt        # Python dependencies
+├── overall_diagnose.py      # Main tool
+├── inventory.yaml           # Device configuration
+├── requirements.txt         # Python dependencies
 ├── diagnostic/
-│   ├── system.py          # CPU, memory, disk, uptime checks
-│   ├── network.py         # VPN, interface checks
-│   ├── services.py        # Docker, systemd checks
-│   └── devices.py         # USB device detection
+│   ├── system.py           # System checks
+│   ├── network.py          # Network checks
+│   ├── services.py         # Docker/service checks
+│   └── devices.py          # USB device checks
 ├── ssh_agent/
-│   └── ssh_client.py      # SSH connection & key bootstrap
-└── reports/               # Generated support bundles
+│   └── ssh_client.py       # SSH connection handling
+└── reports/                # Generated reports
 ```
-
-## Extending
-
-### Adding a New Check Module
-
-1. Create `diagnostic/mycheck.py`:
-
-```python
-def check_something(ssh) -> tuple[str, str]:
-    """Returns (status, message). Status: ok/warn/fail"""
-    code, out, _ = ssh.execute_command(["my-command"])
-    if code == 0:
-        return "ok", "Everything is fine"
-    return "fail", "Something went wrong"
-```
-
-2. Import and use in `overall_diagnose.py`
-
-### Adding New Host Types
-
-Just add to `inventory.yaml` - no code changes needed. The same checks run on all hosts; only the expected values differ.
 
 ## Troubleshooting
 
 ### "Could not connect to device"
 
-- Check VPN connection (Tailscale status)
-- Verify host is powered on
-- Test manually: `ssh user@host`
-- Check credentials in `inventory.yaml`
-
-### "pyusb not available"
-
-USB detection requires `pyusb` and may need root permissions:
-
-```bash
-pip install pyusb
-# For Linux, you may need udev rules or run as root
-```
+1. Check if the device is powered on
+2. Verify VPN connection: `tailscale status`
+3. Test manually: `ssh user@hostname`
+4. Check credentials in `inventory.yaml`
 
 ### "Container keeps restarting"
 
-Check the support bundle logs in `reports/<host>/<timestamp>/`
+This is a serious problem! The app is crashing repeatedly.
+- Check the logs in `reports/<device>/<timestamp>/`
+- Contact support with the report
 
-## License
+### "USB device not found"
 
-Internal use only.
+1. Check if the device is plugged in
+2. Try a different USB port
+3. Run with `--verbose` to see all detected devices
+
+## Requirements
+
+- Python 3.10+
+- SSH access to edge devices
+- For USB detection: `pyusb` (optional, needs root on Linux)
+
+## Dependencies
+
+```
+click>=8.0.0      # CLI interface
+paramiko>=3.0.0   # SSH connections
+PyYAML>=6.0       # Configuration parsing
+pyusb>=1.2.0      # USB device detection
+```
