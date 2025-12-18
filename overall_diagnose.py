@@ -60,20 +60,17 @@ def print_hint(message: str):
     click.echo(click.style(f"       💡 {message}", fg='cyan'))
 
 
-# ============================================================
-# FRIENDLY REPORT GENERATOR
-# ============================================================
 
-def save_friendly_report(host_name: str, results: list, logs: dict) -> str:
+def dump_report(host_name: str, results: list, logs: dict) -> str:
     """Save a mom-friendly diagnostic report. Deletes old reports first."""
     import shutil
     
-    # Delete old reports for this host (keep only the new one)
+    # Delete old reports /easier for clients
     host_reports_dir = Path("reports") / host_name
     if host_reports_dir.exists():
         shutil.rmtree(host_reports_dir)
     
-    # Create new report
+    # Create new one
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     bundle_dir = host_reports_dir / timestamp
     bundle_dir.mkdir(parents=True, exist_ok=True)
@@ -387,17 +384,14 @@ def run_diagnostics(host_name: str, host_config: dict, checks: list, verbose: bo
     if 'network' in checks:
         print_section("🌐", "Network")
         
-        net_config = host_config.get('network', {})
-        vpn_type = net_config.get('vpn_type', 'none')
-        
-        if vpn_type == 'tailscale':
-            ok, msg = network.check_tailscale_reachable(conn.get('hostname', ''))
-            if ok:
-                print_ok("VPN connection working")
-            else:
-                print_warn("VPN might have issues")
-                print_hint("Check internet connection")
-            results.append({'check': 'Tailscale VPN', 'status': 'ok' if ok else 'warn', 'message': msg})
+        # Always check Tailscale VPN
+        ok, msg = network.check_tailscale_reachable(conn.get('hostname', ''))
+        if ok:
+            print_ok("Tailscale VPN working")
+        else:
+            print_warn("Tailscale VPN might have issues")
+            print_hint("Run: tailscale status")
+        results.append({'check': 'Tailscale VPN', 'status': 'ok' if ok else 'warn', 'message': msg})
         
         ok, count, msg = network.check_network_interfaces(ssh)
         print_ok("Network connected") if ok else print_fail("Network problem!")
@@ -586,7 +580,7 @@ def run_diagnostics(host_name: str, host_config: dict, checks: list, verbose: bo
         click.echo("       Your device is healthy and all services are running.\n")
     
     # Save report
-    bundle_path = save_friendly_report(host_name, results, logs)
+    bundle_path = dump_report(host_name, results, logs)
     click.echo(f"    📁 Report saved: {bundle_path}")
     
     if fail_count > 0:

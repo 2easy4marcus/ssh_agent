@@ -126,9 +126,6 @@ ocu4:
     password: "your-password"  # For initial connection
     ssh_key_path: "~/.ssh/id_rsa"
 
-  network:
-    vpn_type: tailscale        # tailscale or none
-
   services:
     compose_dir: "/opt/app"    # Folder with docker-compose files
     systemd_services:
