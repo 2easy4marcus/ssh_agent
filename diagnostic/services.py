@@ -82,17 +82,17 @@ def check_container(ssh, name: str) -> tuple[str, str, str | None]:
     
     state_status = out.strip().lower()
     
-    # PRIORITY 1: Check for restarting FIRST - this is a serious problem!
+    #Check for restarting container
     if "restarting" in state_status:
         logs = _get_container_logs(ssh, name)
         return "fail", f"Container '{name}' is RESTARTING (crash loop!)", logs
     
-    # PRIORITY 2: Check for stopped/dead containers
+    # check for exited container
     if "exited" in state_status or "dead" in state_status:
         logs = _get_container_logs(ssh, name)
         return "fail", f"Container '{name}' has stopped", logs
     
-    # PRIORITY 3: Check for running but unhealthy
+    # Check for running but unhealthy container
     if "running" in state_status or "up" in state_status:
         if "unhealthy" in state_status:
             logs = _get_container_logs(ssh, name)

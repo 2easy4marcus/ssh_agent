@@ -343,13 +343,22 @@ def run_diagnostics(host_name: str, host_config: dict, checks: list, verbose: bo
         results.append({'check': 'Uptime', 'status': 'ok' if ok else 'warn', 'message': msg})
         
         status, val, msg = system.check_cpu_load(ssh)
-        if status == 'ok': 
-            print_ok("Processor running smoothly")
-        elif status == 'warn': 
-            print_warn("Processor working hard")
-            print_hint("Device might be slow - consider restarting")
-        else: 
-            print_fail("Processor overloaded!")
+        if verbose:
+            # Show detailed CPU info
+            if status == 'ok': 
+                print_ok(f"CPU: {msg}")
+            elif status == 'warn': 
+                print_warn(f"CPU: {msg}")
+            else: 
+                print_fail(f"CPU: {msg}")
+        else:
+            if status == 'ok': 
+                print_ok("Processor running smoothly")
+            elif status == 'warn': 
+                print_warn("Processor working hard")
+                print_hint("Device might be slow - consider restarting")
+            else: 
+                print_fail("Processor overloaded!")
         results.append({'check': 'CPU Load', 'status': status, 'message': msg})
         
         status, val, msg = system.check_memory(ssh)
@@ -357,7 +366,8 @@ def run_diagnostics(host_name: str, host_config: dict, checks: list, verbose: bo
             print_ok(f"Memory OK ({val}% used)")
         elif status == 'warn': 
             print_warn(f"Memory getting low ({val}% used)")
-            print_hint("Close unused apps or restart device")
+            if not verbose:
+                print_hint("Close unused apps or restart device")
         else: 
             print_fail(f"Memory critical ({val}% used)!")
         results.append({'check': 'Memory', 'status': status, 'message': msg})
@@ -367,7 +377,8 @@ def run_diagnostics(host_name: str, host_config: dict, checks: list, verbose: bo
             print_ok(f"Storage OK ({val}% used)")
         elif status == 'warn': 
             print_warn(f"Storage getting full ({val}% used)")
-            print_hint("Old files may need cleanup")
+            if not verbose:
+                print_hint("Old files may need cleanup")
         else: 
             print_fail(f"Storage almost full ({val}% used)!")
         results.append({'check': 'Disk', 'status': status, 'message': msg})
@@ -410,13 +421,26 @@ def run_diagnostics(host_name: str, host_config: dict, checks: list, verbose: bo
             if compose_dir:
                 containers = services.get_containers_from_compose_dir(ssh, compose_dir)
                 if containers:
-                    # Check all containers but only show summary
+                    if verbose:
+                        click.echo(click.style(f"    📋 Found {len(containers)} containers in {compose_dir}", fg='cyan'))
+                    
+                    # Check all containers
                     container_ok = 0
                     container_problems = []
                     
                     for container in containers:
                         status, msg, container_logs = services.check_container(ssh, container)
                         results.append({'check': f'Container: {container}', 'status': status, 'message': msg})
+                        
+                        # In verbose mode, show every container
+                        if verbose:
+                            if status == 'ok':
+                                print_ok(f"{container} - running")
+                            elif status == 'warn':
+                                print_warn(f"{container} - {msg}")
+                            else:
+                                print_fail(f"{container} - {msg}")
+                        
                         if status == 'ok':
                             container_ok += 1
                         else:
@@ -424,38 +448,49 @@ def run_diagnostics(host_name: str, host_config: dict, checks: list, verbose: bo
                             if container_logs:
                                 logs[f'container_{container}'] = container_logs
                     
-                    # Show summary instead of each container
-                    container_warnings = [c for c in containers if any(
-                        r['check'] == f'Container: {c}' and r['status'] == 'warn' for r in results)]
-                    container_failures = [c for c in containers if any(
-                        r['check'] == f'Container: {c}' and r['status'] == 'fail' for r in results)]
-                    
-                    if not container_warnings and not container_failures:
-                        print_ok(f"All {len(containers)} applications running smoothly")
-                    else:
-                        if container_ok > 0:
-                            print_ok(f"{container_ok} applications running fine")
-                        for c in container_warnings:
-                            print_warn(f"{c} - running but needs attention")
-                            print_hint("App is working but reporting health issues")
-                        for c in container_failures:
-                            # Check if restarting or stopped
-                            msg = next((r['message'] for r in results if r['check'] == f'Container: {c}'), '')
-                            if 'restarting' in msg.lower():
-                                print_fail(f"{c} - keeps crashing and restarting!")
-                                print_hint("This app has a serious problem - contact support")
-                            else:
-                                print_fail(f"{c} - has stopped working")
-                                print_hint("This app needs to be restarted")
+                    # In non-verbose mode, show summary
+                    if not verbose:
+                        container_warnings = [c for c in containers if any(
+                            r['check'] == f'Container: {c}' and r['status'] == 'warn' for r in results)]
+                        container_failures = [c for c in containers if any(
+                            r['check'] == f'Container: {c}' and r['status'] == 'fail' for r in results)]
+                        
+                        if not container_warnings and not container_failures:
+                            print_ok(f"All {len(containers)} applications running smoothly")
+                        else:
+                            if container_ok > 0:
+                                print_ok(f"{container_ok} applications running fine")
+                            for c in container_warnings:
+                                print_warn(f"{c} - running but needs attention")
+                                print_hint("App is working but reporting health issues")
+                            for c in container_failures:
+                                msg = next((r['message'] for r in results if r['check'] == f'Container: {c}'), '')
+                                if 'restarting' in msg.lower():
+                                    print_fail(f"{c} - keeps crashing and restarting!")
+                                    print_hint("This app has a serious problem - contact support")
+                                else:
+                                    print_fail(f"{c} - has stopped working")
+                                    print_hint("This app needs to be restarted")
         
-        # Systemd services - also summarize
+        # Systemd services
         systemd_services = svc_config.get('systemd_services', [])
         service_ok = 0
         service_problems = []
         
+        if verbose and systemd_services:
+            click.echo(click.style(f"    📋 Checking {len(systemd_services)} system services", fg='cyan'))
+        
         for service in systemd_services:
             status, msg, svc_logs = services.check_systemd_service(ssh, service)
             results.append({'check': f'Service: {service}', 'status': status, 'message': msg})
+            
+            # In verbose mode, show every service
+            if verbose:
+                if status == 'ok':
+                    print_ok(f"{service} - active")
+                else:
+                    print_fail(f"{service} - {msg}")
+            
             if status == 'ok':
                 service_ok += 1
             else:
@@ -463,7 +498,8 @@ def run_diagnostics(host_name: str, host_config: dict, checks: list, verbose: bo
                 if svc_logs:
                     logs[f'service_{service}'] = svc_logs
         
-        if systemd_services:
+        # In non-verbose mode, show summary
+        if not verbose and systemd_services:
             if not service_problems:
                 print_ok(f"All {len(systemd_services)} system services running")
             else:
@@ -477,8 +513,20 @@ def run_diagnostics(host_name: str, host_config: dict, checks: list, verbose: bo
         dev_config = host_config.get('devices', {})
         
         all_usb = devices.list_all_usb_devices()
-        if verbose and all_usb:
-            print_info(f"Found {len(all_usb)} USB device(s) total")
+        
+        # In verbose mode, list ALL USB devices
+        if verbose:
+            click.echo(click.style(f"    📋 All USB devices detected on system:", fg='cyan'))
+            if all_usb:
+                for d in all_usb:
+                    click.echo(f"       • {d['vendor_id']}:{d['product_id']} - {d.get('product', 'Unknown')} ({d.get('manufacturer', 'Unknown')})")
+            else:
+                click.echo("       (No USB devices found or pyusb needs root)")
+            click.echo("")
+        
+        # Check required devices
+        devices_ok = 0
+        devices_missing = []
         
         for device_name, device_info in dev_config.items():
             vid = device_info.get('vendor_id', '')
@@ -487,12 +535,18 @@ def run_diagnostics(host_name: str, host_config: dict, checks: list, verbose: bo
             found, info = devices.find_usb_device(vid, pid)
             
             if found:
-                print_ok(f"{device_name} connected")
+                if verbose:
+                    serial = info.get('serial', 'N/A') if info else 'N/A'
+                    print_ok(f"{device_name} ({vid}:{pid}) - Serial: {serial}")
+                else:
+                    print_ok(f"{device_name} connected")
                 results.append({'check': f'Device: {device_name}', 'status': 'ok', 'message': f'{device_name} connected'})
+                devices_ok += 1
             else:
-                print_fail(f"{device_name} not found!")
+                print_fail(f"{device_name} not found! (expected {vid}:{pid})")
                 print_hint("Check if it's plugged in properly")
                 results.append({'check': f'Device: {device_name}', 'status': 'fail', 'message': f'{device_name} missing'})
+                devices_missing.append(device_name)
     
     ssh.disconnect()
     
