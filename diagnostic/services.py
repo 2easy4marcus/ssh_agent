@@ -1,5 +1,58 @@
-""" check the container status(running,healthy,restarting) 
-"""
+
+import yaml
+
+
+def get_containers_from_compose_dir(ssh, compose_dir: str) -> list[str]:
+    code, out, _ = ssh.execute_command([
+        f"find {compose_dir} -maxdepth 1 \\( -name '*.yml' -o -name '*.yaml' \\) 2>/dev/null"
+    ])
+    
+    if code != 0 or not out.strip():
+        return []
+    
+    yaml_files = [f.strip() for f in out.strip().split('\n') if f.strip()]
+    all_services = []
+    
+    for yaml_file in yaml_files:
+        services = _parse_if_compose(ssh, yaml_file)
+        all_services.extend(services)
+    
+    seen = set()
+    unique_services = []
+    for s in all_services:
+        if s not in seen:
+            seen.add(s)
+            unique_services.append(s)
+    
+    return unique_services
+
+#this one is good for prekit as it has more than one compose 
+def _parse_if_compose(ssh, yaml_path: str) -> list[str]:
+    """
+    Parse yaml file and return services only if it's a docker-compose file.
+    A docker-compose file has a 'services' key at the root level.
+    """
+    code, out, _ = ssh.execute_command([f"cat {yaml_path} 2>/dev/null"])
+    
+    if code != 0 or not out.strip():
+        return []
+    
+    try:
+        data = yaml.safe_load(out)
+        if not isinstance(data, dict):
+            return []
+        
+        if 'services' not in data:
+            return []  #could be pipeline, config, etc.
+        
+        services = data.get('services', {})
+        if isinstance(services, dict):
+            return list(services.keys())
+        return []
+    except:
+        return []
+
+
 def check_docker_running(ssh) -> tuple[bool, str]:
     """Check if Docker daemon is running."""
     code, out, _ = ssh.execute_command(["systemctl is-active docker"])
@@ -13,7 +66,7 @@ def check_container(ssh, name: str) -> tuple[str, str, str | None]:
     Check container status.
     Returns (status, message, logs_if_failed).
     """
-    code, out, _ = ssh.execute_command([f"docker ps -a --filter 'name=^{name}$' --format '{{{{.Status}}}}'"])
+    code, out, _ = ssh.execute_command([f"docker ps -a --filter 'name={name}' --format '{{{{.Status}}}}'"])
     
     if code != 0 or not out.strip():
         return "fail", f"Container '{name}' not found", None
