@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+"""
+Edge Node Diagnostic Tool
+Simple, friendly diagnostics for any host in inventory.yaml
+"""
 import sys
 import os
 import json
@@ -11,101 +16,285 @@ from ssh_agent.ssh_client import SSHAgent, SSHBootstrap
 from diagnostic import system, network, services, devices
 
 
-
-# inventory loading (using yaml directly)
 def load_inventory(path: str = "inventory.yaml") -> dict:
-    """Load inventory from YAML file."""
     if not os.path.exists(path):
         raise FileNotFoundError(f"Inventory not found: {path}")
     with open(path, 'r') as f:
         return yaml.safe_load(f)
 
 
+# ============================================================
+# FRIENDLY OUTPUT HELPERS
+# ============================================================
 
-#output header
 def print_header(title: str):
     click.echo("")
-    click.echo("=" * 65)
-    click.echo(f"        {title}")
-    click.echo("=" * 65)
+    click.echo("╔" + "═" * 63 + "╗")
+    click.echo(f"║{title:^63}║")
+    click.echo("╚" + "═" * 63 + "╝")
 
 
-def print_step(step: int, total: int, title: str):
+def print_section(emoji: str, title: str):
     click.echo("")
-    click.echo(f"[Step {step}/{total}] {title}")
-    click.echo("-" * 45)
+    click.echo(f"  {emoji} {title}")
+    click.echo("  " + "─" * 40)
 
 
 def print_ok(message: str):
-    click.echo(click.style(f"  ✓ {message}", fg='green'))
+    click.echo(click.style(f"    ✅ {message}", fg='green'))
 
 
 def print_fail(message: str):
-    click.echo(click.style(f"  ✗ {message}", fg='red'))
+    click.echo(click.style(f"    ❌ {message}", fg='red'))
 
 
 def print_warn(message: str):
-    click.echo(click.style(f"  ⚠ {message}", fg='yellow'))
+    click.echo(click.style(f"    ⚠️  {message}", fg='yellow'))
 
 
 def print_info(message: str):
-    click.echo(f"    {message}")
+    click.echo(f"       {message}")
 
 
 def print_hint(message: str):
-    click.echo(f"  💡 {message}")
+    click.echo(click.style(f"       💡 {message}", fg='cyan'))
 
 
-def print_what_to_do(items: list[str]):
-    click.echo("")
-    click.echo("  WHAT TO DO:")
-    for item in items:
-        click.echo(f"    {item}")
+# ============================================================
+# FRIENDLY REPORT GENERATOR
+# ============================================================
 
-
-# support bundle
-def save_support_bundle(host_name: str, results: list, logs: dict) -> str:
-    """Save diagnostic results and logs for support."""
+def save_friendly_report(host_name: str, results: list, logs: dict) -> str:
+    """Save a mom-friendly diagnostic report. Deletes old reports first."""
+    import shutil
+    
+    # Delete old reports for this host (keep only the new one)
+    host_reports_dir = Path("reports") / host_name
+    if host_reports_dir.exists():
+        shutil.rmtree(host_reports_dir)
+    
+    # Create new report
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    bundle_dir = Path("reports") / host_name / timestamp
+    bundle_dir = host_reports_dir / timestamp
     bundle_dir.mkdir(parents=True, exist_ok=True)
     
+    # Count results
+    ok_count = sum(1 for r in results if r['status'] == 'ok')
+    warn_count = sum(1 for r in results if r['status'] == 'warn')
+    fail_count = sum(1 for r in results if r['status'] == 'fail')
+    
+    # Friendly report
     report_file = bundle_dir / "report.txt"
     with open(report_file, 'w') as f:
-        f.write(f"Diagnostic Report: {host_name}\n")
-        f.write(f"Time: {datetime.now().isoformat()}\n")
-        f.write("=" * 50 + "\n\n")
+        f.write("╔═══════════════════════════════════════════════════════════════╗\n")
+        f.write("║              🔍 DEVICE HEALTH CHECK REPORT                    ║\n")
+        f.write("╚═══════════════════════════════════════════════════════════════╝\n\n")
+        
+        f.write(f"📅 Date: {datetime.now().strftime('%B %d, %Y at %H:%M')}\n")
+        f.write(f"🖥️  Device: {host_name}\n\n")
+        
+        # Overall status - big and clear
+        f.write("─" * 50 + "\n")
+        if fail_count > 0:
+            f.write("🔴 OVERALL STATUS: PROBLEMS FOUND\n")
+            f.write("   Some things need to be fixed.\n")
+        elif warn_count > 0:
+            f.write("🟡 OVERALL STATUS: MOSTLY OK\n")
+            f.write("   Everything works, but some things need attention.\n")
+        else:
+            f.write("🟢 OVERALL STATUS: ALL GOOD!\n")
+            f.write("   Everything is working perfectly.\n")
+        f.write("─" * 50 + "\n\n")
+        
+        # Summary counts
+        f.write("📊 QUICK SUMMARY:\n")
+        f.write(f"   ✅ Working fine: {ok_count} checks\n")
+        if warn_count > 0:
+            f.write(f"   ⚠️  Needs attention: {warn_count} checks\n")
+        if fail_count > 0:
+            f.write(f"   ❌ Problems: {fail_count} checks\n")
+        f.write("\n")
+        
+        # Problems section (if any)
+        if fail_count > 0:
+            f.write("─" * 50 + "\n")
+            f.write("❌ PROBLEMS THAT NEED FIXING:\n")
+            f.write("─" * 50 + "\n\n")
+            for r in results:
+                if r['status'] == 'fail':
+                    f.write(f"   Problem: {_friendly_name(r['check'])}\n")
+                    f.write(f"   What's wrong: {_friendly_message(r['check'], r['message'])}\n")
+                    f.write(f"   How to fix: {_friendly_fix(r['check'])}\n\n")
+        
+        # Warnings section (if any)
+        if warn_count > 0:
+            f.write("─" * 50 + "\n")
+            f.write("⚠️  THINGS TO KEEP AN EYE ON:\n")
+            f.write("─" * 50 + "\n\n")
+            for r in results:
+                if r['status'] == 'warn':
+                    f.write(f"   Notice: {_friendly_name(r['check'])}\n")
+                    f.write(f"   What's happening: {_friendly_message(r['check'], r['message'])}\n")
+                    f.write(f"   Suggestion: {_friendly_fix(r['check'])}\n\n")
+        
+        # What's working (summary only)
+        f.write("─" * 50 + "\n")
+        f.write("✅ WHAT'S WORKING FINE:\n")
+        f.write("─" * 50 + "\n\n")
+        
+        # Group by category
+        categories = {
+            'connection': [],
+            'system': [],
+            'network': [],
+            'services': [],
+            'devices': []
+        }
         for r in results:
-            icon = "✓" if r['status'] == 'ok' else ("⚠" if r['status'] == 'warn' else "✗")
-            f.write(f"{icon} {r['check']}: {r['message']}\n")
+            if r['status'] == 'ok':
+                cat = _get_category(r['check'])
+                categories[cat].append(r['check'])
+        
+        if categories['connection']:
+            f.write("   🔌 Connection: Device is reachable\n")
+        if categories['system']:
+            f.write(f"   💻 System Health: All {len(categories['system'])} checks passed\n")
+        if categories['network']:
+            f.write(f"   🌐 Network: All {len(categories['network'])} checks passed\n")
+        if categories['services']:
+            f.write(f"   ⚙️  Services: All {len(categories['services'])} services running\n")
+        if categories['devices']:
+            f.write(f"   🔌 Devices: All {len(categories['devices'])} devices connected\n")
+        
+        f.write("\n")
+        f.write("─" * 50 + "\n")
+        f.write("📞 Need help? Contact technical support with this report.\n")
+        f.write("─" * 50 + "\n")
     
+    # Save logs for technical support
     for name, content in logs.items():
         if content:
             log_file = bundle_dir / f"{name}.log"
             with open(log_file, 'w') as f:
                 f.write(content)
     
-    # Create pasteable support message
+    # Simple support message
     msg_file = bundle_dir / "support_message.txt"
-    failures = [r for r in results if r['status'] == 'fail']
-    warnings = [r for r in results if r['status'] == 'warn']
-    
     with open(msg_file, 'w') as f:
-        f.write("--- SUPPORT REQUEST ---\n")
-        f.write(f"Host: {host_name}\n")
-        f.write(f"Time: {datetime.now().isoformat()}\n\n")
-        if failures:
-            f.write("FAILURES:\n")
-            for r in failures:
-                f.write(f"  ✗ {r['check']}: {r['message']}\n")
-        if warnings:
-            f.write("\nWARNINGS:\n")
-            for r in warnings:
-                f.write(f"  ⚠ {r['check']}: {r['message']}\n")
-        f.write(f"\nBundle: {bundle_dir}\n")
-        f.write("--- END ---\n")
+        f.write("Hi Support Team,\n\n")
+        f.write(f"I ran a health check on device '{host_name}' and found some issues.\n\n")
+        
+        if fail_count > 0:
+            f.write("🔴 Problems found:\n")
+            for r in results:
+                if r['status'] == 'fail':
+                    f.write(f"   • {_friendly_name(r['check'])}: {_friendly_message(r['check'], r['message'])}\n")
+            f.write("\n")
+        
+        if warn_count > 0:
+            f.write("🟡 Warnings:\n")
+            for r in results:
+                if r['status'] == 'warn':
+                    f.write(f"   • {_friendly_name(r['check'])}: {_friendly_message(r['check'], r['message'])}\n")
+            f.write("\n")
+        
+        f.write(f"Check date: {datetime.now().strftime('%B %d, %Y at %H:%M')}\n")
+        f.write(f"Full report attached in: {bundle_dir}\n\n")
+        f.write("Thanks!\n")
     
     return str(bundle_dir)
+
+
+def _friendly_name(check: str) -> str:
+    """Convert technical check name to friendly name."""
+    mappings = {
+        'SSH Connection': 'Device Connection',
+        'Hostname': 'Device Name',
+        'Uptime': 'Running Time',
+        'CPU Load': 'Processor Usage',
+        'Memory': 'Memory Usage',
+        'Disk': 'Storage Space',
+        'Tailscale VPN': 'VPN Connection',
+        'Network Interfaces': 'Network Connection',
+        'Docker Daemon': 'Application Engine',
+    }
+    if check in mappings:
+        return mappings[check]
+    if check.startswith('Container:'):
+        return f"App: {check.replace('Container: ', '')}"
+    if check.startswith('Service:'):
+        return f"Service: {check.replace('Service: ', '')}"
+    if check.startswith('Device:'):
+        return check.replace('Device: ', '')
+    return check
+
+
+def _friendly_message(check: str, message: str) -> str:
+    """Convert technical message to friendly message."""
+    # RESTARTING is the most serious - check first!
+    if 'restarting' in message.lower() or 'crash loop' in message.lower():
+        return "🚨 CRITICAL: This app keeps crashing and restarting over and over! It cannot work properly."
+    if 'Memory' in check and 'low' in message.lower():
+        return "The device is running low on memory (like when your phone gets slow)"
+    if 'Disk' in check and ('full' in message.lower() or 'low' in message.lower()):
+        return "Storage space is running low (like when your phone says 'storage full')"
+    if 'CPU' in check and ('high' in message.lower() or 'overload' in message.lower()):
+        return "The device is working very hard and might be slow"
+    if 'VPN' in check or 'Tailscale' in check:
+        return "The secure connection to the device might have issues"
+    if 'not found' in message.lower() or 'missing' in message.lower():
+        return "This component is not connected or not working"
+    if 'stopped' in message.lower() or 'not running' in message.lower():
+        return "This service has stopped and needs to be restarted"
+    if 'unhealthy' in message.lower():
+        return "This app is running but reporting health problems"
+    return message
+
+
+def _friendly_fix(check: str) -> str:
+    """Get friendly fix suggestion based on check name and message."""
+    fixes = {
+        'Memory': "Try restarting the device, or contact support if it keeps happening",
+        'Disk': "Old files may need to be cleaned up - contact support for help",
+        'CPU Load': "The device might need a restart, or there's too much running",
+        'Tailscale VPN': "Check your internet connection, or try restarting the VPN",
+        'Network Interfaces': "Check if network cables are connected properly",
+        'Docker Daemon': "The application engine needs to be restarted - contact support",
+        'SSH Connection': "Make sure the device is powered on and connected to the network",
+    }
+    if check in fixes:
+        return fixes[check]
+    if 'Container:' in check or 'Service:' in check:
+        return "⚠️ CONTACT SUPPORT IMMEDIATELY - This app needs to be fixed by a technician"
+    if 'Device:' in check:
+        return "Check if the device is plugged in properly, try a different USB port"
+    return "Contact support for assistance"
+
+
+def _friendly_fix_for_message(check: str, message: str) -> str:
+    """Get specific fix based on the actual problem."""
+    if 'restarting' in message.lower() or 'crash loop' in message.lower():
+        return "🚨 URGENT: Contact support immediately! This app is broken and keeps crashing."
+    if 'unhealthy' in message.lower():
+        return "The app is working but has issues - monitor it and contact support if it gets worse"
+    if 'stopped' in message.lower():
+        return "The app needs to be restarted - contact support for help"
+    return _friendly_fix(check)
+
+
+def _get_category(check: str) -> str:
+    """Get category for a check."""
+    if check == 'SSH Connection':
+        return 'connection'
+    if check in ['Hostname', 'Uptime', 'CPU Load', 'Memory', 'Disk']:
+        return 'system'
+    if check in ['Tailscale VPN', 'Network Interfaces']:
+        return 'network'
+    if 'Container:' in check or 'Service:' in check or check == 'Docker Daemon':
+        return 'services'
+    if 'Device:' in check:
+        return 'devices'
+    return 'system'
 
 
 # ============================================================
@@ -113,25 +302,16 @@ def save_support_bundle(host_name: str, results: list, logs: dict) -> str:
 # ============================================================
 
 def run_diagnostics(host_name: str, host_config: dict, checks: list, verbose: bool) -> tuple[list, bool]:
-    """Run diagnostics for a single host. Returns (results, success)."""
+    """Run diagnostics for a single host."""
     
     results = []
     logs = {}
     conn = host_config.get('connection', {})
     
-    print_header(f"DIAGNOSING: {host_name}")
-    click.echo(f"  Target: {conn.get('hostname', 'unknown')}")
-    click.echo(f"  User: {conn.get('username', 'unknown')}")
+    print_header(f"🔍 Checking: {host_name}")
+    click.echo(f"    Connecting to {conn.get('hostname', 'unknown')}...")
     
-    total_steps = len(checks) + 1  # +1 for SSH connection
-    current_step = 0
-    
-    
-    # STEP: SSH Connection with auto-bootstrap
-    current_step += 1
-    print_step(current_step, total_steps, "Establishing Connection")
-    click.echo("  Connecting to the device...")
-    
+    # SSH Connection
     bootstrap = SSHBootstrap(
         host=conn.get('hostname', ''),
         username=conn.get('username', ''),
@@ -142,206 +322,226 @@ def run_diagnostics(host_name: str, host_config: dict, checks: list, verbose: bo
     
     try:
         ssh, messages = bootstrap.bootstrap_and_connect()
-        for msg in messages:
-            click.echo(f"  {msg}")
-        results.append({'check': 'SSH Connection', 'status': 'ok', 'message': 'Connected successfully'})
+        print_ok("Connected to device")
+        results.append({'check': 'SSH Connection', 'status': 'ok', 'message': 'Connected'})
     except ConnectionError as e:
         print_fail("Could not connect to device")
-        print_what_to_do([
-            "1. Check if the device is powered on",
-            "2. Verify network/VPN connection",
-            "3. Check credentials in inventory.yaml",
-            f"4. Try manually: ssh {conn.get('username')}@{conn.get('hostname')}"
-        ])
+        print_hint("Check if device is on and connected to network")
         results.append({'check': 'SSH Connection', 'status': 'fail', 'message': str(e)})
         return results, False
     
-    # --------------------------------------------------------
-    # STEP: System Checks
-    # --------------------------------------------------------
+    # System Checks
     if 'system' in checks:
-        current_step += 1
-        print_step(current_step, total_steps, "System Health")
+        print_section("💻", "System Health")
         
-        # Hostname
         ok, val, msg = system.check_hostname(ssh)
-        print_ok(msg) if ok else print_fail(msg)
+        print_ok(f"Device: {val}") if ok else print_fail("Could not identify device")
         results.append({'check': 'Hostname', 'status': 'ok' if ok else 'fail', 'message': msg})
         
-        # Uptime
         ok, val, msg = system.check_uptime(ssh)
         print_ok(msg) if ok else print_warn(msg)
         results.append({'check': 'Uptime', 'status': 'ok' if ok else 'warn', 'message': msg})
         
-        # CPU
         status, val, msg = system.check_cpu_load(ssh)
-        if status == 'ok': print_ok(msg)
-        elif status == 'warn': print_warn(msg)
-        else: print_fail(msg)
+        if status == 'ok': 
+            print_ok("Processor running smoothly")
+        elif status == 'warn': 
+            print_warn("Processor working hard")
+            print_hint("Device might be slow - consider restarting")
+        else: 
+            print_fail("Processor overloaded!")
         results.append({'check': 'CPU Load', 'status': status, 'message': msg})
         
-        # Memory
         status, val, msg = system.check_memory(ssh)
-        if status == 'ok': print_ok(msg)
-        elif status == 'warn': print_warn(msg)
-        else: print_fail(msg)
+        if status == 'ok': 
+            print_ok(f"Memory OK ({val}% used)")
+        elif status == 'warn': 
+            print_warn(f"Memory getting low ({val}% used)")
+            print_hint("Close unused apps or restart device")
+        else: 
+            print_fail(f"Memory critical ({val}% used)!")
         results.append({'check': 'Memory', 'status': status, 'message': msg})
-        if status == 'fail':
-            print_hint("Consider restarting the device or stopping unused services")
         
-        # Disk
         status, val, msg = system.check_disk(ssh)
-        if status == 'ok': print_ok(msg)
-        elif status == 'warn': print_warn(msg)
-        else: print_fail(msg)
+        if status == 'ok': 
+            print_ok(f"Storage OK ({val}% used)")
+        elif status == 'warn': 
+            print_warn(f"Storage getting full ({val}% used)")
+            print_hint("Old files may need cleanup")
+        else: 
+            print_fail(f"Storage almost full ({val}% used)!")
         results.append({'check': 'Disk', 'status': status, 'message': msg})
-        if status != 'ok':
-            print_hint("Delete old logs or unused files to free space")
     
-    # --------------------------------------------------------
-    # STEP: Network Checks
-    # --------------------------------------------------------
+    # Network Checks
     if 'network' in checks:
-        current_step += 1
-        print_step(current_step, total_steps, "Network Status")
+        print_section("🌐", "Network")
         
         net_config = host_config.get('network', {})
         vpn_type = net_config.get('vpn_type', 'none')
         
-        # VPN check (from local machine)
         if vpn_type == 'tailscale':
             ok, msg = network.check_tailscale_reachable(conn.get('hostname', ''))
-            print_ok(msg) if ok else print_warn(msg)
+            if ok:
+                print_ok("VPN connection working")
+            else:
+                print_warn("VPN might have issues")
+                print_hint("Check internet connection")
             results.append({'check': 'Tailscale VPN', 'status': 'ok' if ok else 'warn', 'message': msg})
         
-        # Network interfaces (on remote)
         ok, count, msg = network.check_network_interfaces(ssh)
-        print_ok(msg) if ok else print_fail(msg)
+        print_ok("Network connected") if ok else print_fail("Network problem!")
         results.append({'check': 'Network Interfaces', 'status': 'ok' if ok else 'fail', 'message': msg})
     
-    # --------------------------------------------------------
-    # STEP: Services Checks
-    # --------------------------------------------------------
+    # Services Checks
     if 'services' in checks:
-        current_step += 1
-        print_step(current_step, total_steps, "Services Status")
+        print_section("⚙️", "Applications & Services")
         
         svc_config = host_config.get('services', {})
         
-        # Docker daemon
         ok, msg = services.check_docker_running(ssh)
-        print_ok(msg) if ok else print_fail(msg)
-        results.append({'check': 'Docker Daemon', 'status': 'ok' if ok else 'fail', 'message': msg})
-        
         if not ok:
-            print_hint("Run: sudo systemctl start docker")
+            print_fail("Application engine not running!")
+            print_hint("Contact support - services need restart")
+            results.append({'check': 'Docker Daemon', 'status': 'fail', 'message': msg})
         else:
-            # Check containers
-            for container in svc_config.get('docker_containers', []):
-                status, msg, container_logs = services.check_container(ssh, container)
-                if status == 'ok': print_ok(msg)
-                elif status == 'warn': print_warn(msg)
-                else: print_fail(msg)
-                results.append({'check': f'Container: {container}', 'status': status, 'message': msg})
-                if container_logs:
-                    logs[f'container_{container}'] = container_logs
-                    if verbose:
-                        print_info(f"Logs saved for {container}")
+            results.append({'check': 'Docker Daemon', 'status': 'ok', 'message': msg})
+            
+            compose_dir = svc_config.get('compose_dir')
+            if compose_dir:
+                containers = services.get_containers_from_compose_dir(ssh, compose_dir)
+                if containers:
+                    # Check all containers but only show summary
+                    container_ok = 0
+                    container_problems = []
+                    
+                    for container in containers:
+                        status, msg, container_logs = services.check_container(ssh, container)
+                        results.append({'check': f'Container: {container}', 'status': status, 'message': msg})
+                        if status == 'ok':
+                            container_ok += 1
+                        else:
+                            container_problems.append(container)
+                            if container_logs:
+                                logs[f'container_{container}'] = container_logs
+                    
+                    # Show summary instead of each container
+                    container_warnings = [c for c in containers if any(
+                        r['check'] == f'Container: {c}' and r['status'] == 'warn' for r in results)]
+                    container_failures = [c for c in containers if any(
+                        r['check'] == f'Container: {c}' and r['status'] == 'fail' for r in results)]
+                    
+                    if not container_warnings and not container_failures:
+                        print_ok(f"All {len(containers)} applications running smoothly")
+                    else:
+                        if container_ok > 0:
+                            print_ok(f"{container_ok} applications running fine")
+                        for c in container_warnings:
+                            print_warn(f"{c} - running but needs attention")
+                            print_hint("App is working but reporting health issues")
+                        for c in container_failures:
+                            # Check if restarting or stopped
+                            msg = next((r['message'] for r in results if r['check'] == f'Container: {c}'), '')
+                            if 'restarting' in msg.lower():
+                                print_fail(f"{c} - keeps crashing and restarting!")
+                                print_hint("This app has a serious problem - contact support")
+                            else:
+                                print_fail(f"{c} - has stopped working")
+                                print_hint("This app needs to be restarted")
         
-        # Systemd services
-        for service in svc_config.get('systemd_services', []):
+        # Systemd services - also summarize
+        systemd_services = svc_config.get('systemd_services', [])
+        service_ok = 0
+        service_problems = []
+        
+        for service in systemd_services:
             status, msg, svc_logs = services.check_systemd_service(ssh, service)
-            if status == 'ok': print_ok(msg)
-            elif status == 'warn': print_warn(msg)
-            else: print_fail(msg)
             results.append({'check': f'Service: {service}', 'status': status, 'message': msg})
-            if svc_logs:
-                logs[f'service_{service}'] = svc_logs
+            if status == 'ok':
+                service_ok += 1
+            else:
+                service_problems.append(service)
+                if svc_logs:
+                    logs[f'service_{service}'] = svc_logs
+        
+        if systemd_services:
+            if not service_problems:
+                print_ok(f"All {len(systemd_services)} system services running")
+            else:
+                for prob in service_problems:
+                    print_fail(f"Service problem: {prob}")
     
-    # --------------------------------------------------------
-    # STEP: Device Checks (USB)
-    # --------------------------------------------------------
+    # Device Checks
     if 'devices' in checks:
-        current_step += 1
-        print_step(current_step, total_steps, "Device Detection")
+        print_section("🔌", "Connected Devices")
         
         dev_config = host_config.get('devices', {})
-        usb_devices = dev_config.get('usb', [])
         
-        # List all USB devices
-        click.echo("  Scanning USB devices...")
         all_usb = devices.list_all_usb_devices()
-        if all_usb:
-            print_ok(f"Found {len(all_usb)} USB device(s)")
-            if verbose:
-                for d in all_usb[:5]:  # Show first 5
-                    print_info(f"{d['vendor_id']}:{d['product_id']} - {d['product']}")
-        else:
-            print_warn("Could not list USB devices (pyusb may need root)")
+        if verbose and all_usb:
+            print_info(f"Found {len(all_usb)} USB device(s) total")
         
-        # Check required devices
-        for usb_dev in usb_devices:
-            name = usb_dev.get('name', 'Unknown')
-            vid = usb_dev.get('vendor_id', '')
-            pid = usb_dev.get('product_id', '')
-            required = usb_dev.get('required', True)
+        for device_name, device_info in dev_config.items():
+            vid = device_info.get('vendor_id', '')
+            pid = device_info.get('product_id', '')
             
             found, info = devices.find_usb_device(vid, pid)
             
             if found:
-                print_ok(f"{name} detected")
-                if verbose and info:
-                    print_info(f"Serial: {info.get('serial', 'N/A')}")
-                results.append({'check': f'Device: {name}', 'status': 'ok', 'message': f'{name} connected'})
+                print_ok(f"{device_name} connected")
+                results.append({'check': f'Device: {device_name}', 'status': 'ok', 'message': f'{device_name} connected'})
             else:
-                if required:
-                    print_fail(f"{name} NOT FOUND")
-                    print_hint(f"Check if {name} is properly connected")
-                    results.append({'check': f'Device: {name}', 'status': 'fail', 'message': f'{name} missing'})
-                else:
-                    print_warn(f"{name} not found (optional)")
-                    results.append({'check': f'Device: {name}', 'status': 'warn', 'message': f'{name} not found'})
+                print_fail(f"{device_name} not found!")
+                print_hint("Check if it's plugged in properly")
+                results.append({'check': f'Device: {device_name}', 'status': 'fail', 'message': f'{device_name} missing'})
     
-    # Cleanup
     ssh.disconnect()
     
-    # --------------------------------------------------------
-    # SUMMARY
-    # --------------------------------------------------------
-    print_header("DIAGNOSTIC SUMMARY")
-    
+    # Summary
     ok_count = sum(1 for r in results if r['status'] == 'ok')
     warn_count = sum(1 for r in results if r['status'] == 'warn')
     fail_count = sum(1 for r in results if r['status'] == 'fail')
     
-    click.echo(f"  ✓ Passed: {ok_count}")
-    click.echo(f"  ⚠ Warnings: {warn_count}")
-    click.echo(f"  ✗ Failed: {fail_count}")
-    click.echo("")
+    print_header("📊 Summary")
     
     if fail_count > 0:
-        click.echo("  WHAT'S BROKEN:")
+        click.echo(click.style(f"\n    🔴 PROBLEMS FOUND - Action Required!", fg='red', bold=True))
+        click.echo(f"       Found {fail_count} problem(s) that need to be fixed:\n")
         for r in results:
             if r['status'] == 'fail':
-                click.echo(f"    ✗ {r['check']}: {r['message']}")
-        click.echo("")
-        
-        # Save support bundle
-        bundle_path = save_support_bundle(host_name, results, logs)
-        print_warn(f"Support bundle saved: {bundle_path}")
-        click.echo("")
-        click.echo("  Copy the content of support_message.txt to send to support.")
+                click.echo(click.style(f"       ❌ {_friendly_name(r['check'])}", fg='red'))
+                click.echo(f"          What's wrong: {_friendly_message(r['check'], r['message'])}")
+                click.echo(f"          How to fix: {_friendly_fix_for_message(r['check'], r['message'])}")
+                click.echo("")
     
-    elif warn_count > 0:
-        click.echo("  WHAT NEEDS ATTENTION:")
+    if warn_count > 0:
+        if fail_count > 0:
+            click.echo(click.style(f"    🟡 Also found {warn_count} warning(s):\n", fg='yellow'))
+        else:
+            click.echo(click.style(f"\n    🟡 MOSTLY OK - Some things to watch", fg='yellow', bold=True))
+            click.echo(f"       Found {warn_count} thing(s) that might need attention:\n")
         for r in results:
             if r['status'] == 'warn':
-                click.echo(f"    ⚠ {r['check']}: {r['message']}")
-    else:
-        print_ok("All checks passed! Device is healthy.")
+                click.echo(click.style(f"       ⚠️  {_friendly_name(r['check'])}", fg='yellow'))
+                click.echo(f"          What's happening: {_friendly_message(r['check'], r['message'])}")
+                click.echo(f"          Suggestion: {_friendly_fix_for_message(r['check'], r['message'])}")
+                click.echo("")
+    
+    if fail_count == 0 and warn_count == 0:
+        click.echo(click.style(f"\n    🟢 ALL GOOD!", fg='green', bold=True))
+        click.echo("       Everything is working perfectly.")
+        click.echo("       Your device is healthy and all services are running.\n")
+    
+    # Save report
+    bundle_path = save_friendly_report(host_name, results, logs)
+    click.echo(f"    📁 Report saved: {bundle_path}")
+    
+    if fail_count > 0:
+        click.echo("")
+        click.echo("    ╔════════════════════════════════════════════════════════╗")
+        click.echo("    ║  💡 Need help? Send the report folder to support team  ║")
+        click.echo("    ╚════════════════════════════════════════════════════════╝")
     
     click.echo("")
-    click.echo("=" * 65)
     
     return results, fail_count == 0
 
@@ -351,62 +551,30 @@ def run_diagnostics(host_name: str, host_config: dict, checks: list, verbose: bo
 # ============================================================
 
 @click.command()
-@click.option('--host', '-h', multiple=True, help='Host(s) to diagnose')
-@click.option('--all-hosts', is_flag=True, help='Diagnose all hosts')
+@click.option('--host', '-h', multiple=True, required=True, help='Host(s) to diagnose')
 @click.option('--check', '-c', multiple=True, 
               type=click.Choice(['system', 'network', 'services', 'devices']),
               help='Specific checks (default: all)')
 @click.option('--verbose', '-v', is_flag=True, help='Show more details')
 @click.option('--json-output', is_flag=True, help='Output as JSON')
 @click.option('--inventory', default='inventory.yaml', help='Inventory file')
-
-
-def main(host, all_hosts, check, verbose, json_output, inventory):
-    """
-    Edge Node Diagnostic Tool
-    
-    Run diagnostics on devices defined in inventory.yaml.
-    """
-    # Load inventory
+def main(host, check, verbose, json_output, inventory):
+    """Edge Node Diagnostic Tool - Check if your device is healthy."""
     try:
         inv = load_inventory(inventory)
     except FileNotFoundError:
-        print_fail(f"Inventory not found: {inventory}")
+        click.echo(click.style(f"❌ Could not find {inventory}", fg='red'))
         sys.exit(1)
     
-    # No host specified - show help
-    if not host and not all_hosts:
-        print_header("EDGE NODE DIAGNOSTIC TOOL")
-        click.echo("")
-        click.echo("  Available hosts:")
-        for h in inv.keys():
-            conn = inv[h].get('connection', {})
-            click.echo(f"    • {h} ({conn.get('hostname', '?')})")
-        click.echo("")
-        click.echo("  Usage:")
-        click.echo(f"    python overall_diagnose.py --host {list(inv.keys())[0]}")
-        click.echo("    python overall_diagnose.py --all-hosts")
-        click.echo("    python overall_diagnose.py --host ocu4 --check system --check services")
-        click.echo("")
-        click.echo("  Available checks: system, network, services, devices")
-        click.echo("")
-        sys.exit(0)
+    targets = list(host)
+    for h in targets:
+        if h not in inv:
+            click.echo(click.style(f"❌ Unknown device: {h}", fg='red'))
+            click.echo(f"   Available: {', '.join(inv.keys())}")
+            sys.exit(1)
     
-    # Determine hosts,parse yaml to dict
-    if all_hosts:
-        targets = list(inv.keys())
-    else:
-        targets = list(host)
-        for h in targets:
-            if h not in inv:
-                print_fail(f"Host '{h}' not in inventory")
-                click.echo(f"  Available: {', '.join(inv.keys())}")
-                sys.exit(1)
-    
-    # Determine arguments
     checks = list(check) if check else ['system', 'network', 'services', 'devices']
     
-    # Run diagnostics
     all_results = []
     all_success = True
     
@@ -416,17 +584,8 @@ def main(host, all_hosts, check, verbose, json_output, inventory):
         if not success:
             all_success = False
     
-    # JSON output
     if json_output:
         click.echo(json.dumps(all_results, indent=2))
-    
-    # Multi-host summary
-    if len(targets) > 1:
-        print_header("MULTI-HOST SUMMARY")
-        for r in all_results:
-            icon = "✓" if r['success'] else "✗"
-            click.echo(f"  {icon} {r['host']}")
-        click.echo("")
     
     sys.exit(0 if all_success else 1)
 
