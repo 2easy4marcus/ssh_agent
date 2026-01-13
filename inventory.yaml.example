@@ -1,0 +1,74 @@
+# Edge Node Diagnostic Tool - Inventory Configuration
+# Copy this file to inventory.yaml and customize for your devices
+
+# Production edge device example
+ocu4:
+  connection:
+    hostname: "100.64.0.14"           # Tailscale IP address
+    username: "admin"                 # SSH username
+    port: 22                          # SSH port
+    password: "initial-password"      # For first connection (will setup SSH key)
+    ssh_key_path: "~/.ssh/id_rsa"    # SSH key location
+
+  services:
+    compose_dir: "/opt/app"           # Directory with docker-compose files
+    systemd_services:                 # System services to monitor
+      - docker                        # Docker daemon
+      - tailscaled                    # Tailscale VPN service
+      - nginx                         # Web server (if applicable)
+
+  devices:
+    laser_scanner:                    # Friendly device name
+      vendor_id: "0x0403"            # FTDI USB-Serial
+      product_id: "0x90D9"           # Specific product
+    temperature_sensor:
+      vendor_id: "0x1234"            # Example vendor
+      product_id: "0x5678"           # Example product
+
+# Development/test device
+edge-dev:
+  connection:
+    hostname: "192.168.1.100"        # Local network IP
+    username: "pi"                   # Raspberry Pi default user
+    password: "raspberry"            # Default password
+    port: 22
+
+  services:
+    compose_dir: "/home/pi/docker"   # Docker compose location
+    systemd_services:
+      - docker
+      - ssh
+
+  devices:
+    arduino_uno:
+      vendor_id: "0x2341"            # Arduino vendor
+      product_id: "0x0043"           # Uno R3
+
+# Minimal monitoring (system checks only)
+simple-node:
+  connection:
+    hostname: "edge-simple.local"
+    username: "user"
+    ssh_key_path: "~/.ssh/edge_key"
+  # No services or devices = only system health checks
+
+# IoT Gateway with multiple sensors
+iot-gateway:
+  connection:
+    hostname: "100.64.0.25"
+    username: "iot"
+    password: "iot-secure-pass"
+
+  services:
+    systemd_services:
+      - mosquitto                     # MQTT broker
+      - node-red                      # IoT automation
+      - influxdb                      # Time series database
+
+  devices:
+    zigbee_coordinator:
+      vendor_id: "0x10c4"            # Silicon Labs
+      product_id: "0xea60"           # CP2102 USB-Serial
+    lora_gateway:
+      vendor_id: "0x0403"            # FTDI
+      product_id: "0x6015"           # FT231X USB-Serial

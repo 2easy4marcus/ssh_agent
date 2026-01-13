@@ -113,33 +113,192 @@ python overall_diagnose.py --host ocu4 --check services --check devices
 
 ## Configuration
 
-### inventory.yaml
+### inventory.yaml Configuration
 
-Add your devices to `inventory.yaml`:
+The `inventory.yaml` file defines all your edge devices and what to check on each one. Create this file in your project root.
+
+#### Complete Example
 
 ```yaml
+# Production edge device
 ocu4:
   connection:
-    hostname: "100.64.0.14"    # IP address or hostname
-    username: admin            # SSH username
-    port: 22                   # SSH port
-    password: "your-password"  # For initial connection
-    ssh_key_path: "~/.ssh/id_rsa"
+    hostname: "100.64.0.14"           # Tailscale IP or regular IP/hostname
+    username: "admin"                 # SSH username
+    port: 22                          # SSH port (default: 22)
+    password: "initial-password"      # For first-time connection only
+    ssh_key_path: "~/.ssh/id_rsa"    # SSH key location (optional)
 
   services:
-    compose_dir: "/opt/app"    # Folder with docker-compose files
-    systemd_services:
-      - docker
-      - tailscaled
+    compose_dir: "/opt/app"           # Directory containing docker-compose files
+    systemd_services:                 # System services to monitor
+      - docker                        # Docker daemon
+      - tailscaled                    # Tailscale VPN
+      - nginx                         # Web server
+      - postgresql                    # Database
 
   devices:
-    laser:
-      vendor_id: "0x0403"
-      product_id: "0x90D9"
-    sensor:
+    laser_scanner:                    # Friendly name for device
+      vendor_id: "0x0403"            # USB Vendor ID (hex format)
+      product_id: "0x90D9"           # USB Product ID (hex format)
+    temperature_sensor:
       vendor_id: "0x1234"
       product_id: "0x5678"
+    camera:
+      vendor_id: "0x046d"            # Logitech
+      product_id: "0x085b"
+
+# Development/test device
+edge-dev:
+  connection:
+    hostname: "192.168.1.100"
+    username: "pi"
+    password: "raspberry"
+    port: 22
+
+  services:
+    compose_dir: "/home/pi/docker"
+    systemd_services:
+      - docker
+      - ssh
+
+  devices:
+    test_device:
+      vendor_id: "0x2341"            # Arduino
+      product_id: "0x0043"
+
+# Minimal device (only system checks)
+simple-node:
+  connection:
+    hostname: "edge-simple.local"
+    username: "user"
+    ssh_key_path: "~/.ssh/edge_key"
+  # No services or devices sections = only system checks
 ```
+
+#### Configuration Sections
+
+##### **connection** (Required)
+| Field | Required | Description | Example |
+|-------|----------|-------------|---------|
+| `hostname` | ✅ | IP address or hostname | `"100.64.0.14"`, `"edge1.local"` |
+| `username` | ✅ | SSH username | `"admin"`, `"pi"`, `"ubuntu"` |
+| `password` | ⚠️ | Password for initial connection | `"your-password"` |
+| `ssh_key_path` | ❌ | Path to SSH private key | `"~/.ssh/id_rsa"` |
+| `port` | ❌ | SSH port (default: 22) | `22`, `2222` |
+
+**Authentication Notes:**
+- First run: Uses password, automatically sets up SSH key
+- Future runs: Uses SSH key (no password needed)
+- If no password provided, must have working SSH key already
+
+##### **services** (Optional)
+| Field | Required | Description | Example |
+|-------|----------|-------------|---------|
+| `compose_dir` | ❌ | Directory with docker-compose files | `"/opt/app"`, `"/home/user/docker"` |
+| `systemd_services` | ❌ | List of systemd services to check | `["docker", "nginx", "postgresql"]` |
+
+**Service Discovery:**
+- Tool automatically finds all containers in compose files
+- Checks if Docker daemon is running first
+- Monitors both Docker containers and system services
+
+##### **devices** (Optional)
+Each device needs a friendly name and USB identifiers:
+
+```yaml
+devices:
+  friendly_name:                    # Your choice of name
+    vendor_id: "0x1234"            # USB Vendor ID (hex with 0x prefix)
+    product_id: "0x5678"           # USB Product ID (hex with 0x prefix)
+```
+
+**Finding USB Device IDs:**
+```bash
+# On Linux
+lsusb
+# Output: Bus 001 Device 003: ID 046d:085b Logitech, Inc. C925e
+
+# On Windows
+# Use Device Manager > Properties > Hardware Ids
+# VID_046D&PID_085B
+
+# In the tool (verbose mode)
+python overall_diagnose.py --host mydevice --check devices --verbose
+```
+
+#### Configuration Examples by Use Case
+
+##### **Basic Edge Device**
+```yaml
+basic-edge:
+  connection:
+    hostname: "192.168.1.50"
+    username: "admin"
+    password: "admin123"
+  # Only system and network checks
+```
+
+##### **Docker-Heavy Device**
+```yaml
+docker-node:
+  connection:
+    hostname: "100.64.0.20"
+    username: "deploy"
+    ssh_key_path: "~/.ssh/deploy_key"
+  
+  services:
+    compose_dir: "/opt/services"
+    systemd_services:
+      - docker
+      - docker-compose
+      - tailscaled
+```
+
+##### **IoT Device with Sensors**
+```yaml
+iot-gateway:
+  connection:
+    hostname: "iot-gw.local"
+    username: "iot"
+    password: "sensor123"
+  
+  services:
+    systemd_services:
+      - mosquitto          # MQTT broker
+      - node-red           # IoT flows
+      - influxdb           # Time series DB
+  
+  devices:
+    zigbee_coordinator:
+      vendor_id: "0x10c4"
+      product_id: "0xea60"
+    lora_gateway:
+      vendor_id: "0x0403"
+      product_id: "0x6015"
+```
+
+#### Best Practices
+
+1. **Security**
+   - Use strong passwords for initial setup
+   - Let the tool manage SSH keys automatically
+   - Consider using non-standard SSH ports
+
+2. **Organization**
+   - Use descriptive hostnames in your network
+   - Group similar devices with consistent naming
+   - Document device purposes in comments
+
+3. **Monitoring**
+   - Start with basic system checks, add services gradually
+   - Use verbose mode to discover available containers/services
+   - Test new devices individually before adding to production monitoring
+
+4. **Maintenance**
+   - Keep inventory.yaml in version control
+   - Update device lists when hardware changes
+   - Review and clean up unused entries regularly
 
 ### Adding a New Device
 
